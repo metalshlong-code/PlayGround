@@ -13,7 +13,9 @@
     {name:'The Bedroom', short:'BEDROOM', sky:['#444f79','#b181a0'], ground:'#70546e', edge:'#b68ba3', leaf:'#74658c', path:'PILLOW FORT', bugs:5, tip:'Soft landing! Hop across the floating pillows.'},
     {name:'The Bathroom', short:'BATHROOM', sky:['#8bbfc4','#d9f0e2'], ground:'#658c8e', edge:'#b8ded5', leaf:'#6d9e91', path:'SOAPY SUMMIT', bugs:5, boss:'DRAIN DRAKE', tip:'The drain drake hates bubbles. Use the faucet hazard!'}
   ];
-  const keys = new Set(), pointer = {x:700,y:350,down:false};
+  const keys = new Set(), pointer = {x:700,y:350};
+  const actionHolds={jump:new Set(),web:new Set(),attack:new Set()};
+  function holdAction(source,prop,down){const holds=actionHolds[prop];if(!holds)return;if(down)holds.add(source);else holds.delete(source);game.controls[prop]=holds.size>0;}
   const game = {mode:'menu', time:0, camera:0, stage:0, score:0, best:Number(localStorage.getItem('littlelegs-best')||0), snacks:0, insects:[], webs:[], particles:[], platforms:[], hazards:[], boss:null, eaten:0, stageTime:0, toastTimer:0, shake:0, sound:true, mutedUntil:0, last:0, controls:{x:0,y:0,jump:false,web:false,attack:false}, totalTime:0};
   const spider = {x:100,y:FLOOR,vx:0,vy:0,face:1,health:3,maxHealth:3,web:100,grounded:true,climbing:false,invuln:0,attackCd:0,webCd:0,jumpLock:0,anim:0,dead:false};
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -24,18 +26,27 @@
   function beep(freq=420,duration=.08,type='sine',volume=.035){if(!game.sound)return;try{const AC=window.AudioContext||window.webkitAudioContext;if(!game.audio)game.audio=new AC();const o=game.audio.createOscillator(),g=game.audio.createGain();o.type=type;o.frequency.value=freq;g.gain.setValueAtTime(volume,game.audio.currentTime);g.gain.exponentialRampToValueAtTime(.001,game.audio.currentTime+duration);o.connect(g);g.connect(game.audio.destination);o.start();o.stop(game.audio.currentTime+duration)}catch{}}
   function emit(x,y,color,n=8,power=120){for(let i=0;i<n;i++){let a=rand(0,Math.PI*2),s=rand(.2,1)*power;game.particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:rand(.35,.8),max:.8,color,size:rand(2,5)})}}
   function seedStage(index){
-    game.stage=index;game.stageTime=0;game.eaten=0;game.camera=0;game.insects=[];game.webs=[];game.particles=[];game.hazards=[];game.boss=null;
-    const w=worlds[index];
-    game.length=1900;game.platforms=[{x:0,y:FLOOR,w:game.length,h:150,kind:'ground'}];
-    for(let i=0;i<8;i++){let x=235+i*205+rand(-45,40);let y=FLOOR-rand(85,185);let width=rand(95,165);game.platforms.push({x,y,w:width,h:18,kind:index===5?'pillow':'ledge',phase:rand(0,6)});}
+    game.stage=index;game.stageTime=0;game.eaten=0;game.area=0;game.areaEaten=0;game.camera=0;game.insects=[];game.webs=[];game.particles=[];game.hazards=[];game.boss=null;
+    const w=worlds[index], goals=[1,1,1];
+    for(let i=3;i<w.bugs;i++)goals[1+(i-3)%2]++;
+    game.length=2100;game.areas=goals.map((goal,i)=>({start:i*700,end:(i+1)*700,goal}));
+    game.checkpoints=[700,1400];game.platforms=[{x:0,y:FLOOR,w:game.length,h:150,kind:'ground'}];
+    for(let i=0;i<10;i++){let x=175+i*194+rand(-35,35);let y=FLOOR-rand(85,185);let width=rand(95,165);game.platforms.push({x,y,w:width,h:18,kind:index===5?'pillow':'ledge',phase:rand(0,6)});}
+    game.checkpoints.forEach((x,i)=>game.platforms.push({x:x-22,y:FLOOR-64,w:44,h:64,kind:'checkpoint',label:`AREA ${i+2}`}));
     game.platforms.push({x:game.length-190,y:FLOOR-95,w:130,h:18,kind:'exit'});
-    for(let i=0;i<w.bugs+2;i++){let px=220+i*(game.length-440)/(w.bugs+1)+rand(-35,35),py=FLOOR-rand(35,180);game.insects.push({x:px,y:py,alive:true,type:Math.random()<.3?'glow':'bug',phase:rand(0,6),vx:rand(-18,18)});}
+    for(let area=0;area<3;area++){
+      const section=game.areas[area];
+      for(let i=0;i<section.goal+1;i++){
+        let px=section.start+130+(i+1)*(section.end-section.start-250)/(section.goal+1)+rand(-28,28),py=FLOOR-rand(38,135);
+        game.insects.push({x:px,y:py,alive:true,type:Math.random()<.3?'glow':'bug',phase:rand(0,6),vx:rand(-18,18)});
+      }
+    }
     if(index===0){game.platforms.push({x:35,y:410,w:150,h:20,kind:'bark'});game.hazards.push({x:1000,y:300,w:70,h:205,kind:'branch'});}
-    if(index===1){game.boss={name:w.boss,x:1510,y:FLOOR-32,hp:5,max:5,r:34,phase:0,hit:0};game.hazards.push({x:1425,y:FLOOR-100,w:105,h:20,kind:'flower'});}
-    if(index===4){game.boss={name:w.boss,x:1510,y:FLOOR-35,hp:6,max:6,r:38,phase:0,hit:0};game.hazards.push({x:1040,y:FLOOR-28,w:130,h:25,kind:'fan'});game.hazards.push({x:800,y:FLOOR-180,w:70,h:180,kind:'stove'});}
-    if(index===6){game.boss={name:w.boss,x:1510,y:FLOOR-40,hp:7,max:7,r:42,phase:0,hit:0};game.hazards.push({x:1400,y:FLOOR-15,w:110,h:15,kind:'drain'});game.hazards.push({x:700,y:FLOOR-90,w:100,h:18,kind:'soap'});}
+    if(index===1){game.boss={name:w.boss,x:game.length-330,y:FLOOR-32,hp:5,max:5,r:34,phase:0,hit:0};game.hazards.push({x:game.length-440,y:FLOOR-100,w:105,h:20,kind:'flower'});}
+    if(index===4){game.boss={name:w.boss,x:game.length-330,y:FLOOR-35,hp:6,max:6,r:38,phase:0,hit:0};game.hazards.push({x:game.length-440,y:FLOOR-28,w:130,h:25,kind:'fan'});game.hazards.push({x:1250,y:FLOOR-180,w:70,h:180,kind:'stove'});}
+    if(index===6){game.boss={name:w.boss,x:game.length-330,y:FLOOR-40,hp:7,max:7,r:42,phase:0,hit:0};game.hazards.push({x:game.length-455,y:FLOOR-15,w:110,h:15,kind:'drain'});game.hazards.push({x:1450,y:FLOOR-90,w:100,h:18,kind:'soap'});}
     spider.x=95;spider.y=FLOOR;spider.vx=0;spider.vy=0;spider.health=Math.max(spider.health,2);spider.grounded=true;spider.climbing=false;spider.invuln=1.2;spider.dead=false;
-    ui.stage.textContent=w.name;ui.world.textContent=String(index+1).padStart(2,'0')+' / 07';ui.tip.textContent=w.tip;ui.status.textContent=w.path;
+    ui.stage.textContent=w.name;ui.world.textContent=String(index+1).padStart(2,'0')+' / 07';ui.tip.textContent=w.tip;ui.status.textContent=`${w.path} · AREA 1/3`;
     updateHud();
   }
   function updateHud(){const pct=clamp(spider.health/spider.maxHealth,0,1);ui.health.style.width=(pct*100)+'%';ui.healthValue.textContent=spider.health+' / '+spider.maxHealth;ui.snacks.textContent=game.snacks;ui.web.style.width=spider.web+'%';ui.score.textContent=game.score;ui.progress.style.width=clamp(spider.x/(game.length||1900)*100,0,100)+'%';}
@@ -86,6 +97,7 @@
     for(const p of game.platforms){if(p.x+p.w<game.camera-30||p.x>game.camera+W+30)continue;
       if(p.kind==='ground')continue;
       if(p.kind==='exit'){ctx.fillStyle='#d5ee83';ctx.globalAlpha=.85+.15*Math.sin(game.time*4);ctx.beginPath();ctx.ellipse(p.x+p.w/2,p.y-38,28,42,0,0,7);ctx.fill();ctx.globalAlpha=.35;ctx.fillStyle='#fff8c4';ctx.beginPath();ctx.ellipse(p.x+p.w/2,p.y-38,16,30,0,0,7);ctx.fill();ctx.globalAlpha=1;continue;}
+      if(p.kind==='checkpoint'){ctx.fillStyle='#20352d';ctx.globalAlpha=.78;rr(p.x,p.y,p.w,p.h,12);ctx.fill();ctx.globalAlpha=1;ctx.strokeStyle='#c9e78a';ctx.lineWidth=3;ctx.beginPath();ctx.arc(p.x+p.w/2,p.y+18,15,Math.PI,0);ctx.lineTo(p.x+p.w/2+15,p.y+p.h);ctx.moveTo(p.x+p.w/2-15,p.y+18);ctx.lineTo(p.x+p.w/2-15,p.y+p.h);ctx.stroke();ctx.fillStyle='#e6f4bd';ctx.font='8px "DM Mono"';ctx.textAlign='center';ctx.fillText(p.label,p.x+p.w/2,p.y-7);continue;}
       ctx.fillStyle=p.kind==='pillow'?'#9d7995':p.kind==='bark'?'#88673d':w.edge;rr(p.x,p.y,p.w,p.h,8);ctx.fill();ctx.fillStyle=p.kind==='pillow'?'#d1a8c1':p.kind==='bark'?'#ad8957':'#d6d394';rr(p.x,p.y,p.w,6,5);ctx.fill();
       ctx.globalAlpha=.2;ctx.fillStyle='#18221a';ctx.fillRect(p.x+8,p.y+p.h,p.w-16,5);ctx.globalAlpha=1;
       if(p.kind==='pillow'){ctx.strokeStyle='#e4c4d2';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(p.x+12,p.y+9);ctx.quadraticCurveTo(p.x+p.w/2,p.y+15,p.x+p.w-12,p.y+9);ctx.stroke();}
@@ -151,7 +163,7 @@
   function fireWeb(){if(spider.web<22||spider.webCd>0)return;spider.web-=22;spider.webCd=.33;let target=game.boss&&game.boss.hp>0?game.boss:null;let dx=target?target.x-spider.x:spider.face*290;let dy=target?target.y-(spider.y-24):0;let d=Math.hypot(dx,dy)||1;game.webs.push({x:spider.x+spider.face*15,y:spider.y-25,vx:dx/d*480,vy:dy/d*480,life:1.1});beep(700,.07,'sine',.018);}
   function bite(){if(spider.attackCd>0)return;spider.attackCd=.38;emit(spider.x+spider.face*24,spider.y-28,'#ffd18a',5,32);beep(190,.06,'square',.018);if(game.boss&&game.boss.hp>0&&Math.abs(game.boss.x-spider.x)<68&&Math.abs(game.boss.y-spider.y)<54)hitBoss(1,'bite');}
   function hitBoss(amount,source){const b=game.boss;if(!b||b.hp<=0)return;b.hp=Math.max(0,b.hp-amount);b.hit=.25;game.score+=120;game.shake=5;emit(b.x,b.y-25,'#f5d477',11,110);beep(source==='hazard'?110:520,.12,source==='hazard'?'sawtooth':'triangle',.04);if(b.hp===0){game.score+=900;toast(`${b.name} defeated! The way is clear!`);emit(b.x,b.y-20,'#ffe58f',32,190);beep(780,.3,'triangle',.05);}}
-  function activateEat(){let b=game.insects.find(i=>i.alive&&Math.hypot(i.x-spider.x,(i.y)-(spider.y-18))<55);if(!b)return toast('Get a little closer to that snack.');b.alive=false;game.eaten++;game.snacks++;game.score+=b.type==='glow'?150:100;spider.health=Math.min(spider.maxHealth,spider.health+1);spider.web=Math.min(100,spider.web+34);emit(b.x,b.y,b.type==='glow'?'#fff5a2':'#a7d870',14,100);toast(b.type==='glow'?'Glowbug! +1 heart · web refilled':'Crunch! +1 heart · web refilled');beep(b.type==='glow'?880:620,.12,'sine',.04);updateHud();}
+  function activateEat(){let b=game.insects.find(i=>i.alive&&Math.hypot(i.x-spider.x,(i.y)-(spider.y-18))<55);if(!b)return toast('Get a little closer to that snack.');b.alive=false;game.eaten++;game.areaEaten++;game.snacks++;game.score+=b.type==='glow'?150:100;spider.health=Math.min(spider.maxHealth,spider.health+1);spider.web=Math.min(100,spider.web+34);emit(b.x,b.y,b.type==='glow'?'#fff5a2':'#a7d870',14,100);toast(b.type==='glow'?'Glowbug! +1 heart · web refilled':'Crunch! +1 heart · web refilled');beep(b.type==='glow'?880:620,.12,'sine',.04);updateHud();}
   function update(dt){
     game.time+=dt;game.totalTime+=dt;if(game.mode!=='play')return;game.stageTime+=dt;
     if(game.toastTimer>0){game.toastTimer-=dt;if(game.toastTimer<=0)ui.toast.classList.remove('show');}
@@ -164,12 +176,12 @@
       if(game.stage===0&&spider.x<188&&spider.y<420)wall=true;
     }
     if(wall){spider.climbing=true;spider.grounded=false;spider.vy=-120;spider.vx*=.3;}else spider.climbing=false;
-    spider.x+=spider.vx*dt;spider.x=clamp(spider.x,20,game.length-25);
+    spider.x+=spider.vx*dt;spider.x=clamp(spider.x,Math.max(20,game.areas[game.area].start+12),game.length-25);
     if(!spider.climbing){spider.vy+=1120*dt;spider.y+=spider.vy*dt;}
     let land=FLOOR;for(const p of game.platforms){if(p.kind==='ground')continue;if(spider.x>p.x-8&&spider.x<p.x+p.w+8&&spider.y<=p.y+10&&spider.y+spider.vy*dt>=p.y&&spider.vy>=0)land=Math.min(land,p.y);}
     if(spider.y>=land){spider.y=land;spider.vy=0;spider.grounded=true;spider.climbing=false;}else spider.grounded=false;
     if(spider.y>H+90){hurt(1);spider.y=FLOOR;spider.x=Math.max(35,spider.x-120);spider.vy=0;}
-    if(game.controls.web||pointer.down)fireWeb();if(game.controls.attack)bite();if(game.controls.eat){game.controls.eat=false;activateEat();}
+    if(game.controls.web)fireWeb();if(game.controls.attack)bite();if(game.controls.eat){game.controls.eat=false;activateEat();}
     // Bugs flutter just enough to feel alive, but stay within a reachable part of the stage.
     for(const b of game.insects){if(!b.alive)continue;b.x+=Math.sin(game.time*1.6+b.phase)*b.vx*dt;b.y+=Math.sin(game.time*2.7+b.phase)*5*dt;if(Math.hypot(b.x-spider.x,b.y-(spider.y-20))<19)activateBug(b);}
     for(const p of game.webs){p.x+=p.vx*dt;p.y+=p.vy*dt;p.life-=dt;if(game.boss&&game.boss.hp>0&&Math.hypot(p.x-game.boss.x,p.y-(game.boss.y-25))<game.boss.r+12){hitBoss(1,'web');p.life=0;}if(p.x<0||p.x>game.length||p.y<0||p.y>H)p.life=0;}game.webs=game.webs.filter(p=>p.life>0);
@@ -183,12 +195,17 @@
     if(spider.invuln<=0&&game.boss&&game.boss.hp>0&&Math.abs(game.boss.x-spider.x)<48&&Math.abs(game.boss.y-spider.y)<45)hurt(1);
     game.camera=clamp(spider.x-W*.42,0,game.length-W);
     if(game.boss&&game.boss.hp>0&&spider.x>game.length-210)spider.x=game.length-210;
-    const minBugs=worlds[game.stage].bugs;let ready=game.eaten>=minBugs&&(!game.boss||game.boss.hp<=0);
+    if(game.area<2&&spider.x>game.checkpoints[game.area]-20){
+      const area=game.areas[game.area];
+      if(game.areaEaten>=area.goal){game.area++;game.areaEaten=0;spider.x=game.areas[game.area].start+22;ui.status.textContent=`${worlds[game.stage].path} · AREA ${game.area+1}/3`;toast(`Checkpoint reached! Area ${game.area+1} of 3`);beep(610,.16,'triangle',.035);}
+      else{spider.x=game.checkpoints[game.area]-20;if(game.toastTimer<=0)toast(`This area needs ${area.goal-game.areaEaten} more bug snack${area.goal-game.areaEaten===1?'':'s'}!`);}
+    }
+    const finalArea=game.areas[2],ready=game.area===2&&game.areaEaten>=finalArea.goal&&(!game.boss||game.boss.hp<=0);
     if(spider.x>game.length-130&&ready){if(game.stage===worlds.length-1){game.score+=Math.max(0,spider.health)*250;endGame(true);}else{let next=game.stage+1;game.score+=300;spider.health=Math.min(3,spider.health+1);seedStage(next);toast(`Welcome to ${worlds[next].name}! +1 heart`);beep(680,.2,'triangle',.04);}}
-    if(spider.x>game.length-155&&!ready){spider.x=game.length-155;if(game.boss&&game.boss.hp>0)toast(`${game.boss.name} is blocking the way!`);else toast(`Find ${Math.max(0,minBugs-game.eaten)} more bug snack${minBugs-game.eaten===1?'':'s'}!`);}
+    if(spider.x>game.length-155&&!ready){spider.x=game.length-155;if(game.boss&&game.boss.hp>0)toast(`${game.boss.name} is blocking the way!`);else toast(`Find ${Math.max(0,finalArea.goal-game.areaEaten)} more bug snack${finalArea.goal-game.areaEaten===1?'':'s'} in this area!`);}
     game.shake=Math.max(0,game.shake-dt*20);updateHud();
   }
-  function activateBug(b){if(!b.alive)return;b.alive=false;game.eaten++;game.snacks++;game.score+=b.type==='glow'?150:100;spider.health=Math.min(spider.maxHealth,spider.health+1);spider.web=Math.min(100,spider.web+35);emit(b.x,b.y,b.type==='glow'?'#fff5a2':'#a7d870',12,100);toast(b.type==='glow'?'Glowbug snack! +heart +web':'Bug snack! +heart +web');beep(b.type==='glow'?880:620,.12,'sine',.04);updateHud();}
+  function activateBug(b){if(!b.alive)return;b.alive=false;game.eaten++;game.areaEaten++;game.snacks++;game.score+=b.type==='glow'?150:100;spider.health=Math.min(spider.maxHealth,spider.health+1);spider.web=Math.min(100,spider.web+35);emit(b.x,b.y,b.type==='glow'?'#fff5a2':'#a7d870',12,100);toast(b.type==='glow'?'Glowbug snack! +heart +web':'Bug snack! +heart +web');beep(b.type==='glow'?880:620,.12,'sine',.04);updateHud();}
   function hurt(n){if(spider.invuln>0||game.mode!=='play')return;spider.health-=n;spider.invuln=1.15;game.shake=10;emit(spider.x,spider.y-25,'#ffb17e',10,110);beep(100,.22,'sawtooth',.045);toast('Ouch! Find a bug snack to heal.');if(spider.health<=0){spider.health=0;updateHud();endGame(false);}}
   function togglePause(){if(game.mode==='play'){game.mode='paused';ui.overlay.classList.remove('hidden');ui.pause.classList.remove('visible');ui.status.textContent='TAKING A LITTLE REST';ui.card.querySelector('.eyebrow').innerHTML='<span class="eyebrow-line"></span> PAUSED UNDER A LEAF <span class="eyebrow-line"></span>';ui.card.querySelector('h1').innerHTML='TAKE A<br><span>BREATHER</span>';ui.card.querySelector('.subtitle').innerHTML='Your little adventure is safe right here.';ui.start.querySelector('span').textContent='CONTINUE ADVENTURE';}
     else if(game.mode==='paused'){game.mode='play';ui.overlay.classList.add('hidden');ui.pause.classList.add('visible');ui.status.textContent=worlds[game.stage].path;}}
@@ -197,25 +214,26 @@
   ui.sound.addEventListener('click',()=>{game.sound=!game.sound;ui.sound.querySelector('.sound-state').textContent=game.sound?'ON':'OFF';ui.sound.setAttribute('aria-label',game.sound?'Mute sound':'Enable sound');if(game.sound)beep(600,.08);});
   bestUpdate();
   window.addEventListener('keydown',e=>{let k=e.key.toLowerCase();if([' ','arrowleft','arrowright','arrowup','arrowdown'].includes(k))e.preventDefault();keys.add(k);
-    if(k==='p'||k==='escape'){togglePause();return;}
-    if((k===' '||k==='arrowup'||k==='w')&&!e.repeat)game.controls.jump=true;
-    if(k==='j'||k===' '){}if(k==='j')game.controls.web=true;
-    if(k==='k'||k==='f')game.controls.attack=true;
+    if(k==='p'||k==='escape'){if(!e.repeat)togglePause();return;}
+    if(k===' '||k==='arrowup'||k==='w')holdAction(`key:${k}`,'jump',true);
+    if(k==='j')holdAction('key:j','web',true);
+    if(k==='k'||k==='f')holdAction(`key:${k}`,'attack',true);
     if(k==='e'&&!e.repeat)game.controls.eat=true;
   });
-  window.addEventListener('keyup',e=>{const k=e.key.toLowerCase();keys.delete(k);if(k===' '||k==='arrowup'||k==='w')game.controls.jump=false;if(k==='j')game.controls.web=false;if(k==='k'||k==='f')game.controls.attack=false;});
+  window.addEventListener('keyup',e=>{const k=e.key.toLowerCase();keys.delete(k);if(k===' '||k==='arrowup'||k==='w')holdAction(`key:${k}`,'jump',false);if(k==='j')holdAction('key:j','web',false);if(k==='k'||k==='f')holdAction(`key:${k}`,'attack',false);});
   function moveKeys(){let left=keys.has('a')||keys.has('arrowleft'),right=keys.has('d')||keys.has('arrowright'),up=keys.has('w')||keys.has('arrowup'),down=keys.has('s')||keys.has('arrowdown');if(!joy.active){game.controls.x=(right?1:0)-(left?1:0);game.controls.y=(down?1:0)-(up?1:0);}}
   canvas.addEventListener('pointermove',e=>{let r=canvas.getBoundingClientRect();pointer.x=(e.clientX-r.left)*W/r.width;pointer.y=(e.clientY-r.top)*H/r.height;});
-  canvas.addEventListener('pointerdown',e=>{if(game.mode!=='play')return;e.preventDefault();pointer.down=true;try{canvas.setPointerCapture(e.pointerId)}catch{};});
-  window.addEventListener('pointerup',()=>{pointer.down=false;game.controls.web=false;game.controls.attack=false;game.controls.jump=false;});
+  canvas.addEventListener('pointerdown',e=>{if(game.mode!=='play')return;e.preventDefault();holdAction(`canvas:${e.pointerId}`,'web',true);try{canvas.setPointerCapture(e.pointerId)}catch{}});
+  function releaseCanvasPointer(e){holdAction(`canvas:${e.pointerId}`,'web',false);}
+  canvas.addEventListener('pointerup',releaseCanvasPointer);canvas.addEventListener('pointercancel',releaseCanvasPointer);canvas.addEventListener('lostpointercapture',releaseCanvasPointer);
   canvas.addEventListener('contextmenu',e=>{e.preventDefault();if(game.mode==='play')bite();});
   const joy={active:false,id:null,cx:0,cy:0};const stick=$('#stick'),joyEl=$('#joystick');
   joyEl.addEventListener('pointerdown',e=>{e.preventDefault();joy.active=true;joy.id=e.pointerId;const r=joyEl.getBoundingClientRect();joy.cx=r.left+r.width/2;joy.cy=r.top+r.height/2;joyEl.setPointerCapture(e.pointerId);updateJoy(e);});
   joyEl.addEventListener('pointermove',e=>{if(joy.active&&joy.id===e.pointerId)updateJoy(e);});
   function updateJoy(e){let dx=e.clientX-joy.cx,dy=e.clientY-joy.cy,d=Math.hypot(dx,dy),max=27;if(d>max){dx*=max/d;dy*=max/d;}stick.style.transform=`translate(${dx}px,${dy}px)`;game.controls.x=Math.abs(dx)<7?0:dx/max;game.controls.y=Math.abs(dy)<7?0:dy/max;}
-  function endJoy(){joy.active=false;joy.id=null;stick.style.transform='';game.controls.x=0;game.controls.y=0;moveKeys();}
-  joyEl.addEventListener('pointerup',endJoy);joyEl.addEventListener('pointercancel',endJoy);
-  function bindHold(id,prop){const el=$(id);el.addEventListener('pointerdown',e=>{e.preventDefault();game.controls[prop]=true;try{el.setPointerCapture(e.pointerId)}catch{}});el.addEventListener('pointerup',()=>game.controls[prop]=false);el.addEventListener('pointercancel',()=>game.controls[prop]=false);el.addEventListener('lostpointercapture',()=>game.controls[prop]=false);}
+  function endJoy(e){if(!joy.active||e&&e.pointerId!==joy.id)return;joy.active=false;joy.id=null;stick.style.transform='';game.controls.x=0;game.controls.y=0;moveKeys();}
+  joyEl.addEventListener('pointerup',endJoy);joyEl.addEventListener('pointercancel',endJoy);joyEl.addEventListener('lostpointercapture',endJoy);
+  function bindHold(id,prop){const el=$(id);el.addEventListener('pointerdown',e=>{e.preventDefault();holdAction(`${id}:${e.pointerId}`,prop,true);try{el.setPointerCapture(e.pointerId)}catch{}});const release=e=>holdAction(`${id}:${e.pointerId}`,prop,false);el.addEventListener('pointerup',release);el.addEventListener('pointercancel',release);el.addEventListener('lostpointercapture',release);}
   bindHold('#jumpButton','jump');bindHold('#webButton','web');bindHold('#attackButton','attack');
   let previous=performance.now();function frame(now){let dt=Math.min(.032,(now-previous)/1000);previous=now;moveKeys();update(dt);render();requestAnimationFrame(frame);}requestAnimationFrame(frame);
 })();
